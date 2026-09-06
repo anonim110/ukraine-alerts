@@ -3,31 +3,19 @@ const ALERTS_URL = 'https://tryvoha.online/api/v1/alerts';
 const REFRESH_MS = 30_000;
 
 const OBLAST_NAMES = {
-  vinnytska: 'Вінницька область',
-  volynska: 'Волинська область',
-  dnipropetrovska: 'Дніпропетровська область',
-  donetska: 'Донецька область',
-  zhytomyrska: 'Житомирська область',
-  zakarpatska: 'Закарпатська область',
-  zaporizka: 'Запорізька область',
-  'ivano-frankivska': 'Івано-Франківська область',
-  kyivska: 'Київська область',
-  kirovohradska: 'Кіровоградська область',
-  luhanska: 'Луганська область',
-  lvivska: 'Львівська область',
-  kyiv: 'Київ',
-  mykolaivska: 'Миколаївська область',
-  odeska: 'Одеська область',
-  poltavska: 'Полтавська область',
-  rivnenska: 'Рівненська область',
-  sumska: 'Сумська область',
-  ternopilska: 'Тернопільська область',
-  kharkivska: 'Харківська область',
-  khersonska: 'Херсонська область',
-  khmelnytska: 'Хмельницька область',
-  cherkaska: 'Черкаська область',
-  chernivetska: 'Чернівецька область',
-  chernihivska: 'Чернігівська область',
+  vinnytska: 'Вінницька область', volynska: 'Волинська область',
+  dnipropetrovska: 'Дніпропетровська область', donetska: 'Донецька область',
+  zhytomyrska: 'Житомирська область', zakarpatska: 'Закарпатська область',
+  zaporizka: 'Запорізька область', 'ivano-frankivska': 'Івано-Франківська область',
+  kyivska: 'Київська область', kirovohradska: 'Кіровоградська область',
+  luhanska: 'Луганська область', lvivska: 'Львівська область', kyiv: 'Київ',
+  mykolaivska: 'Миколаївська область', odeska: 'Одеська область',
+  poltavska: 'Полтавська область', rivnenska: 'Рівненська область',
+  sumska: 'Сумська область', ternopilska: 'Тернопільська область',
+  kharkivska: 'Харківська область', khersonska: 'Херсонська область',
+  khmelnytska: 'Хмельницька область', cherkaska: 'Черкаська область',
+  chernivetska: 'Чернівецька область', chernihivska: 'Чернігівська область',
+  krym: 'Автономна Республіка Крим', crimea: 'Автономна Республіка Крим',
 };
 
 const state = {
@@ -41,17 +29,14 @@ const state = {
   hasLoadedOnce: false,
 };
 
+const $ = (id) => document.getElementById(id);
 const elements = {
-  activeCount: document.getElementById('activeCount'),
-  regionList: document.getElementById('regionList'),
-  notice: document.getElementById('notice'),
-  updatedAt: document.getElementById('updatedAt'),
-  refreshButton: document.getElementById('refreshButton'),
-  searchInput: document.getElementById('searchInput'),
-  liveState: document.getElementById('liveState'),
-  liveText: document.getElementById('liveText'),
-  soundButton: document.getElementById('soundButton'),
-  regionTemplate: document.getElementById('regionTemplate'),
+  activeCount: $('activeCount'), districtCount: $('districtCount'),
+  topActiveCount: $('topActiveCount'), topDistrictCount: $('topDistrictCount'),
+  regionList: $('regionList'), notice: $('notice'), updatedAt: $('updatedAt'),
+  refreshButton: $('refreshButton'), searchInput: $('searchInput'),
+  liveState: $('liveState'), liveText: $('liveText'), soundButton: $('soundButton'),
+  regionTemplate: $('regionTemplate'),
 };
 
 const map = L.map('map', {
@@ -60,6 +45,8 @@ const map = L.map('map', {
   minZoom: 5,
   maxZoom: 9,
   scrollWheelZoom: true,
+  doubleClickZoom: false,
+  boxZoom: false,
   zoomSnap: 0.25,
   preferCanvas: true,
 });
@@ -68,17 +55,22 @@ map.attributionControl.setPrefix(false);
 map.attributionControl.addAttribution('Межі: darmat1/ukraine-geo-data');
 map.fitBounds([[44.0, 21.5], [53.0, 41.5]], { padding: [10, 10] });
 
+// Забороняємо подвійний тап/клік для зуму, але залишаємо звичайні жести карти.
+document.addEventListener('dblclick', (event) => event.preventDefault(), { passive: false });
+let lastTouchEnd = 0;
+document.addEventListener('touchend', (event) => {
+  const now = Date.now();
+  if (now - lastTouchEnd <= 300 && !event.target.closest('.leaflet-control-zoom')) event.preventDefault();
+  lastTouchEnd = now;
+}, { passive: false });
+
 function normalizeName(value = '') {
-  return String(value)
-    .toLowerCase()
-    .replaceAll('’', "'")
-    .replaceAll('ʼ', "'")
+  return String(value).toLowerCase()
+    .replaceAll('’', "'").replaceAll('ʼ', "'")
     .replace(/^м\.\s*/, 'місто ')
     .replace(/автономна республіка крим/g, 'крим')
-    .replace(/область/g, '')
-    .replace(/місто/g, '')
-    .replace(/[^а-яіїєґa-z0-9]/g, '')
-    .trim();
+    .replace(/область/g, '').replace(/місто/g, '')
+    .replace(/[^а-яіїєґa-z0-9]/g, '').trim();
 }
 
 function featureName(feature) {
@@ -97,13 +89,7 @@ function buildAlertPayload(apiJson) {
     if (!name) continue;
 
     if (!regions.has(name)) {
-      regions.set(name, {
-        name,
-        level: 'partial',
-        alerts: [],
-        startedAt: alert.started_at || null,
-        types: [],
-      });
+      regions.set(name, { name, level: 'partial', alerts: [], startedAt: alert.started_at || null });
     }
 
     const region = regions.get(name);
@@ -120,19 +106,30 @@ function buildAlertPayload(apiJson) {
     }
   }
 
-  const normalizedRegions = [...regions.values()]
-    .map((region) => ({
+  const normalizedRegions = [...regions.values()].map((region) => {
+    const districtsBySlug = new Map();
+    for (const alert of region.alerts) {
+      if (alert.locationType !== 'district') continue;
+      districtsBySlug.set(alert.slug, {
+        slug: alert.slug,
+        name: alert.location,
+        startedAt: alert.startedAt,
+      });
+    }
+    return {
       ...region,
-      types: [region.level === 'danger' ? 'air_raid' : 'district_air_raid'],
+      districts: [...districtsBySlug.values()].sort((a, b) => a.name.localeCompare(b.name, 'uk')),
       alertCount: region.alerts.length,
-    }))
-    .sort((a, b) => a.name.localeCompare(b.name, 'uk'));
+    };
+  }).sort((a, b) => a.name.localeCompare(b.name, 'uk'));
 
+  const districtCount = normalizedRegions.reduce((sum, region) => sum + region.districts.length, 0);
   return {
     ok: true,
     source: 'Tryvoha.online',
     updatedAt: apiJson?.updated_at || new Date().toISOString(),
     activeRegionCount: normalizedRegions.length,
+    activeDistrictCount: districtCount,
     activeAlertCount: rawAlerts.length,
     regions: normalizedRegions,
   };
@@ -146,14 +143,12 @@ function statusForRegion(name) {
 
 function styleFeature(feature) {
   const { level } = statusForRegion(featureName(feature));
-  const fillColor = level === 'danger' ? '#c8322d' : level === 'partial' ? '#b87a23' : '#d5d0c7';
-
   return {
     color: '#111111',
     weight: 1,
     opacity: 1,
-    fillColor,
-    fillOpacity: level === 'safe' ? 0.9 : 0.92,
+    fillColor: level === 'danger' ? '#c6332d' : level === 'partial' ? '#b97a24' : '#d4cec3',
+    fillOpacity: level === 'safe' ? 0.9 : 0.94,
   };
 }
 
@@ -163,25 +158,17 @@ function onEachFeature(feature, layer) {
 
   layer.bindTooltip(() => {
     const status = statusForRegion(name);
-    const label = status.level === 'danger'
-      ? 'ТРИВОГА В ОБЛАСТІ'
-      : status.level === 'partial'
-        ? 'ТРИВОГА В РАЙОНІ'
-        : 'БЕЗ АКТИВНИХ';
-    return `${name} · ${label}`;
+    if (status.level === 'safe') return `${name} · БЕЗ АКТИВНИХ`;
+    const districts = status.region?.districts?.length || 0;
+    return status.level === 'danger'
+      ? `${name} · ТРИВОГА · ${districts} РАЙ.`
+      : `${name} · ${districts} РАЙ. ПІД ТРИВОГОЮ`;
   }, { className: 'region-tooltip', sticky: true, direction: 'top' });
 
   layer.on({
-    mouseover(event) {
-      event.target.setStyle({ weight: 2.2 });
-      event.target.bringToFront();
-    },
-    mouseout(event) {
-      if (state.geoLayer) state.geoLayer.resetStyle(event.target);
-    },
-    click(event) {
-      map.fitBounds(event.target.getBounds(), { padding: [45, 45], maxZoom: 7.5 });
-    },
+    mouseover(e) { e.target.setStyle({ weight: 2.2 }); e.target.bringToFront(); },
+    mouseout(e) { if (state.geoLayer) state.geoLayer.resetStyle(e.target); },
+    click(e) { map.fitBounds(e.target.getBounds(), { padding: [40, 40], maxZoom: 7.25 }); },
   });
 }
 
@@ -190,19 +177,22 @@ async function loadGeo() {
     const response = await fetch(GEO_URL, { cache: 'force-cache' });
     if (!response.ok) throw new Error(`GeoJSON ${response.status}`);
     state.geo = await response.json();
-    renderMap();
+    renderMap(true);
   } catch (error) {
     console.error(error);
-    showNotice('Не вдалося завантажити межі областей. Перевірте підключення до інтернету.');
+    showNotice('Не вдалося завантажити межі областей. Перевірте інтернет.');
   }
 }
 
-function renderMap() {
+function renderMap(fit = false) {
   if (!state.geo) return;
+  const previousCenter = map.getCenter();
+  const previousZoom = map.getZoom();
   state.regionLayers.clear();
   if (state.geoLayer) state.geoLayer.remove();
   state.geoLayer = L.geoJSON(state.geo, { style: styleFeature, onEachFeature }).addTo(map);
-  map.fitBounds(state.geoLayer.getBounds(), { padding: [14, 14] });
+  if (fit) map.fitBounds(state.geoLayer.getBounds(), { padding: [12, 12] });
+  else map.setView(previousCenter, previousZoom, { animate: false });
 }
 
 function setConnection(kind, text) {
@@ -210,15 +200,8 @@ function setConnection(kind, text) {
   if (kind) elements.liveState.classList.add(kind);
   elements.liveText.textContent = text;
 }
-
-function showNotice(message) {
-  elements.notice.textContent = message;
-  elements.notice.classList.remove('hidden');
-}
-
-function hideNotice() {
-  elements.notice.classList.add('hidden');
-}
+function showNotice(message) { elements.notice.textContent = message; elements.notice.classList.remove('hidden'); }
+function hideNotice() { elements.notice.classList.add('hidden'); }
 
 function formatDuration(startedAt) {
   if (!startedAt) return '—';
@@ -229,30 +212,18 @@ function formatDuration(startedAt) {
   return h > 0 ? `${h}г ${m}хв` : `${m}хв`;
 }
 
-function typeLabel(type) {
-  if (type === 'air_raid') return 'Повітряна тривога';
-  if (type === 'district_air_raid') return 'Тривога в районі';
-  return type;
-}
-
 function renderList() {
   const query = state.filter.trim().toLowerCase();
   const regions = [...(state.alerts?.regions || [])]
-    .sort((a, b) => {
-      const priorityA = a.level === 'danger' ? 2 : 1;
-      const priorityB = b.level === 'danger' ? 2 : 1;
-      return priorityB - priorityA || a.name.localeCompare(b.name, 'uk');
-    })
-    .filter((region) => region.name.toLowerCase().includes(query));
+    .sort((a, b) => (b.level === 'danger') - (a.level === 'danger') || b.districts.length - a.districts.length || a.name.localeCompare(b.name, 'uk'))
+    .filter((region) => region.name.toLowerCase().includes(query) || region.districts.some((district) => district.name.toLowerCase().includes(query)));
 
   elements.regionList.replaceChildren();
 
   if (!regions.length) {
     const empty = document.createElement('div');
     empty.className = 'empty-state';
-    empty.textContent = state.alerts?.activeRegionCount === 0
-      ? 'Наразі активних повітряних тривог немає.'
-      : 'За вашим пошуком нічого не знайдено.';
+    empty.textContent = state.alerts?.activeRegionCount === 0 ? 'Наразі активних повітряних тривог немає.' : 'За вашим пошуком нічого не знайдено.';
     elements.regionList.appendChild(empty);
     return;
   }
@@ -260,21 +231,38 @@ function renderList() {
   regions.forEach((region, index) => {
     const node = elements.regionTemplate.content.cloneNode(true);
     const row = node.querySelector('.region-row');
+    row.classList.add(region.level);
     node.querySelector('.region-index').textContent = String(index + 1).padStart(2, '0');
     node.querySelector('h3').textContent = region.name;
     node.querySelector('.region-duration').textContent = formatDuration(region.startedAt);
+    node.querySelector('.status-word').textContent = region.level === 'danger' ? 'Тривога в області' : 'Районна тривога';
+    node.querySelector('.district-summary').textContent = region.districts.length
+      ? `${region.districts.length} ${region.districts.length === 1 ? 'район' : 'районів'}`
+      : 'вся область';
 
-    const typeWrap = node.querySelector('.region-types');
-    region.types.forEach((type) => {
-      const chip = document.createElement('span');
-      chip.className = `type-chip ${type === 'air_raid' ? 'air' : 'other'}`;
-      chip.textContent = typeLabel(type);
-      typeWrap.appendChild(chip);
+    const districtList = node.querySelector('.district-list');
+    const visibleDistricts = query
+      ? region.districts.filter((district) => district.name.toLowerCase().includes(query) || region.name.toLowerCase().includes(query))
+      : region.districts;
+
+    visibleDistricts.forEach((district) => {
+      const item = document.createElement('div');
+      item.className = 'district-item';
+      item.innerHTML = '<span class="district-dot"></span><span class="district-name"></span><span class="district-time"></span>';
+      item.querySelector('.district-name').textContent = district.name;
+      item.querySelector('.district-time').textContent = formatDuration(district.startedAt);
+      districtList.appendChild(item);
     });
 
-    const locate = node.querySelector('.locate-button');
-    locate.addEventListener('click', () => focusRegion(region.name));
-    row.dataset.region = region.name;
+    if (!region.districts.length && region.level === 'danger') {
+      const item = document.createElement('div');
+      item.className = 'district-item';
+      item.innerHTML = '<span class="district-dot"></span><span class="district-name">Тривога оголошена для всієї області</span><span class="district-time"></span>';
+      districtList.appendChild(item);
+    }
+
+    node.querySelector('.locate-button').addEventListener('click', () => focusRegion(region.name));
+    row.addEventListener('dblclick', (event) => event.preventDefault());
     elements.regionList.appendChild(node);
   });
 }
@@ -282,7 +270,7 @@ function renderList() {
 function focusRegion(name) {
   const layer = state.regionLayers.get(normalizeName(name));
   if (!layer?.getBounds) return;
-  map.fitBounds(layer.getBounds(), { padding: [45, 45], maxZoom: 7.5 });
+  map.fitBounds(layer.getBounds(), { padding: [40, 40], maxZoom: 7.25 });
   layer.openTooltip();
 }
 
@@ -292,75 +280,54 @@ function beep() {
     const ctx = new AudioCtx();
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
-    osc.type = 'sine';
-    osc.frequency.value = 740;
+    osc.type = 'sine'; osc.frequency.value = 740;
     gain.gain.setValueAtTime(0.0001, ctx.currentTime);
     gain.gain.exponentialRampToValueAtTime(0.08, ctx.currentTime + 0.02);
     gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.24);
-    osc.connect(gain).connect(ctx.destination);
-    osc.start();
-    osc.stop(ctx.currentTime + 0.26);
-  } catch (error) {
-    console.warn('Audio unavailable', error);
-  }
+    osc.connect(gain).connect(ctx.destination); osc.start(); osc.stop(ctx.currentTime + 0.26);
+  } catch (error) { console.warn('Audio unavailable', error); }
 }
 
 function maybeNotifyNewAlerts() {
-  const currentDanger = new Set(
-    (state.alerts?.regions || []).map((region) => normalizeName(region.name))
-  );
-
+  const currentDanger = new Set((state.alerts?.regions || []).map((region) => normalizeName(region.name)));
   if (state.hasLoadedOnce && state.soundEnabled) {
-    const hasNew = [...currentDanger].some((name) => !state.previousDangerRegions.has(name));
-    if (hasNew) beep();
+    if ([...currentDanger].some((name) => !state.previousDangerRegions.has(name))) beep();
   }
-
   state.previousDangerRegions = currentDanger;
   state.hasLoadedOnce = true;
+}
+
+function updateCounters(data) {
+  elements.activeCount.textContent = data.activeRegionCount;
+  elements.districtCount.textContent = data.activeDistrictCount;
+  elements.topActiveCount.textContent = data.activeRegionCount;
+  elements.topDistrictCount.textContent = data.activeDistrictCount;
 }
 
 async function loadAlerts(manual = false) {
   if (manual) elements.refreshButton.disabled = true;
   setConnection('', 'Оновлення');
-
   try {
     const response = await fetch(ALERTS_URL, { cache: 'no-store' });
     if (!response.ok) throw new Error(`Tryvoha API ${response.status}`);
-
     const data = buildAlertPayload(await response.json());
     state.alerts = data;
-    elements.activeCount.textContent = data.activeRegionCount;
-    elements.updatedAt.textContent = `Оновлення: ${new Intl.DateTimeFormat('uk-UA', {
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-    }).format(new Date(data.updatedAt))}`;
-
-    hideNotice();
-    setConnection('ok', 'Наживо');
-    maybeNotifyNewAlerts();
-    renderList();
-    renderMap();
+    updateCounters(data);
+    elements.updatedAt.textContent = `Оновлення: ${new Intl.DateTimeFormat('uk-UA', { hour: '2-digit', minute: '2-digit', second: '2-digit' }).format(new Date(data.updatedAt))}`;
+    hideNotice(); setConnection('ok', 'Наживо'); maybeNotifyNewAlerts(); renderList(); renderMap(false);
   } catch (error) {
     console.error(error);
-    showNotice('Джерело даних тимчасово недоступне. Перевірте мережу та спробуйте оновити сторінку.');
+    showNotice('Джерело даних тимчасово недоступне. Спробуйте оновити сторінку.');
     setConnection('error', 'Помилка');
-  } finally {
-    elements.refreshButton.disabled = false;
-  }
+  } finally { elements.refreshButton.disabled = false; }
 }
 
-elements.searchInput.addEventListener('input', (event) => {
-  state.filter = event.target.value;
-  renderList();
-});
-
+elements.searchInput.addEventListener('input', (event) => { state.filter = event.target.value; renderList(); });
 elements.refreshButton.addEventListener('click', () => loadAlerts(true));
-
 elements.soundButton.addEventListener('click', () => {
   state.soundEnabled = !state.soundEnabled;
   elements.soundButton.setAttribute('aria-pressed', String(state.soundEnabled));
-  elements.soundButton.textContent = `ЗВУК: ${state.soundEnabled ? 'УВІМК' : 'ВИМК'}`;
+  elements.soundButton.textContent = `ЗВУК ${state.soundEnabled ? 'УВІМК' : 'ВИМК'}`;
   if (state.soundEnabled) beep();
 });
 
@@ -368,3 +335,4 @@ loadGeo();
 loadAlerts();
 setInterval(() => loadAlerts(false), REFRESH_MS);
 setInterval(renderList, 60_000);
+window.addEventListener('resize', () => map.invalidateSize({ pan: false }));
