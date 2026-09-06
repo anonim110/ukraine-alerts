@@ -4,9 +4,8 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="theme-color" content="#111111" />
-  <meta name="description" content="Мінімалістична мапа актуальних повітряних тривог в Україні." />
+  <meta name="description" content="Мапа актуальних повітряних тривог в Україні по областях і районах." />
   <title>Тривоги України</title>
-
   <link rel="preconnect" href="https://unpkg.com" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <link rel="stylesheet" href="/style.css" />
@@ -16,16 +15,19 @@
     <header class="topbar">
       <a class="brand" href="/" aria-label="Тривоги України">
         <span class="brand-mark" aria-hidden="true"></span>
-        <span>ТРИВОГИ<br>УКРАЇНИ</span>
+        <span class="brand-copy"><strong>ТРИВОГИ</strong><small>УКРАЇНИ</small></span>
       </a>
 
-      <div class="topbar-actions">
+      <div class="topbar-status">
         <div class="live-state" id="liveState">
           <span class="live-dot" aria-hidden="true"></span>
           <span id="liveText">Підключення</span>
         </div>
-        <button class="icon-button" id="soundButton" type="button" aria-pressed="false">ЗВУК: ВИМК</button>
+        <div class="top-stat"><b id="topActiveCount">—</b><span>обл.</span></div>
+        <div class="top-stat"><b id="topDistrictCount">—</b><span>рай.</span></div>
       </div>
+
+      <button class="icon-button" id="soundButton" type="button" aria-pressed="false">ЗВУК ВИМК</button>
     </header>
 
     <main class="layout">
@@ -34,13 +36,14 @@
 
         <div class="map-title">
           <p>СТАН ЗАРАЗ</p>
-          <h1><span id="activeCount">—</span> областей<br>з активною тривогою</h1>
+          <h1><span id="activeCount">—</span> областей</h1>
+          <div class="map-subline"><b id="districtCount">—</b> районів з активною тривогою</div>
         </div>
 
         <div class="legend" aria-label="Легенда карти">
-          <span><i class="legend-box danger"></i> Тривога</span>
-          <span><i class="legend-box partial"></i> Тривога в районі</span>
-          <span><i class="legend-box safe"></i> Немає активних</span>
+          <span><i class="legend-box danger"></i> Область</span>
+          <span><i class="legend-box partial"></i> Район</span>
+          <span><i class="legend-box safe"></i> Немає</span>
         </div>
       </section>
 
@@ -48,39 +51,46 @@
         <div class="sidebar-head">
           <div>
             <p class="eyebrow">АКТИВНІ ПОДІЇ</p>
-            <h2>Області</h2>
+            <h2>Області <span>/ райони</span></h2>
           </div>
           <button id="refreshButton" class="text-button" type="button">ОНОВИТИ</button>
         </div>
 
         <label class="search-wrap">
-          <span class="sr-only">Пошук області</span>
-          <input id="searchInput" type="search" placeholder="Пошук області" autocomplete="off" />
+          <span class="sr-only">Пошук області або району</span>
+          <span class="search-mark">⌕</span>
+          <input id="searchInput" type="search" placeholder="Пошук області або району" autocomplete="off" />
         </label>
 
         <div class="notice hidden" id="notice"></div>
         <div class="region-list" id="regionList" aria-live="polite"></div>
 
-        <footer class="sidebar-footer">
+        <div class="sidebar-meta">
           <span id="updatedAt">Оновлення: —</span>
           <span>Дані: <a href="https://tryvoha.online/" target="_blank" rel="noreferrer">Tryvoha.online</a></span>
-        </footer>
-        <p class="safety-note">Інформаційний сервіс. Для рішень щодо безпеки користуйтеся офіційними каналами та вказівками влади.</p>
+        </div>
+        <p class="safety-note">Інформаційний сервіс. Для безпеки користуйтеся офіційними каналами та вказівками влади.</p>
       </aside>
     </main>
   </div>
 
   <template id="regionTemplate">
     <article class="region-row">
-      <div class="region-index"></div>
-      <div class="region-copy">
-        <div class="region-title-line">
-          <h3></h3>
-          <span class="region-duration"></span>
+      <div class="region-main">
+        <div class="region-index"></div>
+        <div class="region-copy">
+          <div class="region-title-line">
+            <h3></h3>
+            <span class="region-duration"></span>
+          </div>
+          <div class="region-status-line">
+            <span class="status-word"></span>
+            <span class="district-summary"></span>
+          </div>
         </div>
-        <div class="region-types"></div>
+        <button class="locate-button" type="button" aria-label="Показати область на карті">↗</button>
       </div>
-      <button class="locate-button" type="button" aria-label="Показати на карті">↗</button>
+      <div class="district-list"></div>
     </article>
   </template>
 
