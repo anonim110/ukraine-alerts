@@ -1,13 +1,9 @@
 services:
   - type: web
-    runtime: static
+    runtime: node
     name: ukraine-alerts
-    buildCommand: echo "Static site"
-    staticPublishPath: public
-    headers:
-      - path: /*
-        name: X-Content-Type-Options
-        value: nosniff
-      - path: /*
-        name: Referrer-Policy
-        value: strict-origin-when-cross-origin
+    buildCommand: echo "No build step"
+    startCommand: node server.js
+    envVars:
+      - key: ALERTS_IN_UA_TOKEN
+        sync: false

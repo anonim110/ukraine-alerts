@@ -1,0 +1,13 @@
+{
+  "name": "ukraine-alerts",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Мапа активних тривог в Україні на даних alerts.in.ua",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

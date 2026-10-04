@@ -1,21 +1,13 @@
 const GEO_URL = 'https://cdn.jsdelivr.net/gh/darmat1/ukraine-geo-data@main/geodata/Ukraine.geojson';
-const ALERTS_URL = 'https://tryvoha.online/api/v1/alerts';
+const ALERTS_URL = '/api/alerts';
 const REFRESH_MS = 30_000;
 
-const OBLAST_NAMES = {
-  vinnytska: 'Вінницька область', volynska: 'Волинська область',
-  dnipropetrovska: 'Дніпропетровська область', donetska: 'Донецька область',
-  zhytomyrska: 'Житомирська область', zakarpatska: 'Закарпатська область',
-  zaporizka: 'Запорізька область', 'ivano-frankivska': 'Івано-Франківська область',
-  kyivska: 'Київська область', kirovohradska: 'Кіровоградська область',
-  luhanska: 'Луганська область', lvivska: 'Львівська область', kyiv: 'Київ',
-  mykolaivska: 'Миколаївська область', odeska: 'Одеська область',
-  poltavska: 'Полтавська область', rivnenska: 'Рівненська область',
-  sumska: 'Сумська область', ternopilska: 'Тернопільська область',
-  kharkivska: 'Харківська область', khersonska: 'Херсонська область',
-  khmelnytska: 'Хмельницька область', cherkaska: 'Черкаська область',
-  chernivetska: 'Чернівецька область', chernihivska: 'Чернігівська область',
-  krym: 'Автономна Республіка Крим', crimea: 'Автономна Республіка Крим',
+const ALERT_TYPES = {
+  air_raid: 'Повітряна тривога',
+  artillery_shelling: 'Загроза артобстрілу',
+  urban_fights: 'Вуличні бої',
+  chemical: 'Хімічна загроза',
+  nuclear: 'Радіаційна загроза',
 };
 
 const state = {
@@ -83,22 +75,24 @@ function buildAlertPayload(apiJson) {
   const regions = new Map();
 
   for (const alert of rawAlerts) {
-    const isState = alert.type === 'state';
-    const oblastSlug = isState ? alert.slug : alert.oblast_slug;
-    const name = isState ? alert.name_uk : OBLAST_NAMES[oblastSlug];
+    const name = alert.location_oblast || alert.location_title;
     if (!name) continue;
+    // Тривога на всю область, або на м. Київ (його location_oblast збігається з назвою).
+    const isState = alert.location_type === 'oblast' || alert.location_title === alert.location_oblast;
 
     if (!regions.has(name)) {
-      regions.set(name, { name, level: 'partial', alerts: [], startedAt: alert.started_at || null });
+      regions.set(name, { name, level: 'partial', alerts: [], types: new Set(), startedAt: alert.started_at || null });
     }
 
     const region = regions.get(name);
     region.alerts.push({
-      slug: alert.slug,
-      location: alert.name_uk,
-      locationType: alert.type,
+      slug: String(alert.location_uid ?? alert.id),
+      location: alert.location_title,
+      locationType: isState ? 'state' : 'district',
+      alertType: alert.alert_type,
       startedAt: alert.started_at || null,
     });
+    region.types.add(alert.alert_type);
 
     if (isState) region.level = 'danger';
     if (alert.started_at && (!region.startedAt || new Date(alert.started_at) < new Date(region.startedAt))) {
@@ -113,12 +107,14 @@ function buildAlertPayload(apiJson) {
       districtsBySlug.set(alert.slug, {
         slug: alert.slug,
         name: alert.location,
+        alertType: alert.alertType,
         startedAt: alert.startedAt,
       });
     }
     return {
       ...region,
       districts: [...districtsBySlug.values()].sort((a, b) => a.name.localeCompare(b.name, 'uk')),
+      types: [...region.types],
       alertCount: region.alerts.length,
     };
   }).sort((a, b) => a.name.localeCompare(b.name, 'uk'));
@@ -126,8 +122,8 @@ function buildAlertPayload(apiJson) {
   const districtCount = normalizedRegions.reduce((sum, region) => sum + region.districts.length, 0);
   return {
     ok: true,
-    source: 'Tryvoha.online',
-    updatedAt: apiJson?.updated_at || new Date().toISOString(),
+    source: 'alerts.in.ua',
+    updatedAt: apiJson?.fetched_at || new Date().toISOString(),
     activeRegionCount: normalizedRegions.length,
     activeDistrictCount: districtCount,
     activeAlertCount: rawAlerts.length,
@@ -161,8 +157,8 @@ function onEachFeature(feature, layer) {
     if (status.level === 'safe') return `${name} · БЕЗ АКТИВНИХ`;
     const districts = status.region?.districts?.length || 0;
     return status.level === 'danger'
-      ? `${name} · ТРИВОГА · ${districts} РАЙ.`
-      : `${name} · ${districts} РАЙ. ПІД ТРИВОГОЮ`;
+      ? `${name} · ТРИВОГА · ${districts} ЛОК.`
+      : `${name} · ${districts} ЛОК. ПІД ТРИВОГОЮ`;
   }, { className: 'region-tooltip', sticky: true, direction: 'top' });
 
   layer.on({
@@ -235,9 +231,11 @@ function renderList() {
     node.querySelector('.region-index').textContent = String(index + 1).padStart(2, '0');
     node.querySelector('h3').textContent = region.name;
     node.querySelector('.region-duration').textContent = formatDuration(region.startedAt);
-    node.querySelector('.status-word').textContent = region.level === 'danger' ? 'Тривога в області' : 'Районна тривога';
+    const typeLabels = region.types.filter((type) => type !== 'air_raid').map((type) => ALERT_TYPES[type] || type);
+    node.querySelector('.status-word').textContent = (region.level === 'danger' ? 'Тривога в області' : 'Локальна тривога')
+      + (typeLabels.length ? ` · ${typeLabels.join(', ')}` : '');
     node.querySelector('.district-summary').textContent = region.districts.length
-      ? `${region.districts.length} ${region.districts.length === 1 ? 'район' : 'районів'}`
+      ? `${region.districts.length} ${region.districts.length === 1 ? 'локація' : 'локацій'}`
       : 'вся область';
 
     const districtList = node.querySelector('.district-list');
@@ -249,7 +247,9 @@ function renderList() {
       const item = document.createElement('div');
       item.className = 'district-item';
       item.innerHTML = '<span class="district-dot"></span><span class="district-name"></span><span class="district-time"></span>';
-      item.querySelector('.district-name').textContent = district.name;
+      item.querySelector('.district-name').textContent = district.alertType && district.alertType !== 'air_raid'
+        ? `${district.name} (${ALERT_TYPES[district.alertType] || district.alertType})`
+        : district.name;
       item.querySelector('.district-time').textContent = formatDuration(district.startedAt);
       districtList.appendChild(item);
     });
@@ -309,7 +309,7 @@ async function loadAlerts(manual = false) {
   setConnection('', 'Оновлення');
   try {
     const response = await fetch(ALERTS_URL, { cache: 'no-store' });
-    if (!response.ok) throw new Error(`Tryvoha API ${response.status}`);
+    if (!response.ok) throw new Error(`Alerts API ${response.status}`);
     const data = buildAlertPayload(await response.json());
     state.alerts = data;
     updateCounters(data);
